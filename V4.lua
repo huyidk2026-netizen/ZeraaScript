@@ -1,574 +1,432 @@
 --[[
-    ZERAA HUB PREMIUM - ALL IN ONE [FIXED LOAD & V4 LOGIC]
-    Version: 5.0 Stable
-    Dev: Zeraa Team / Fixed by AI
-    
-    [Changelog]
-    - Fix lỗi "Attempt to index nil with CreateWindow" (Thêm Backup Lib).
-    - Tích hợp Auto Farm Level, Raid, Sea Event.
-    - Race V4 Logic:
-      + Mink: TP tới đích.
-      + Angel: Tween mượt.
-      + Cyborg: TP về sảnh né bom.
-      + Shark: Bay đầu SeaBeast -> Spam 1-4 (Vũ khí) + Z,X,C,V.
-      + Human/Ghoul: Gom quái + Kill.
-    - Auto Train: Farm Nộ -> Bật Tộc -> Bay Y=2000 -> Hết Tộc Xuống.
+    AUTO V4 ULTIMATE (REDZ HUB ORIGINAL LOGIC)
+    - Auto Bone: 100% Copy from Redz Hub (No Fall, Super Fast)
+    - Auto V4: Redz Logic
+    - Fix TP ToT: Direct CFrame + Stream Update
 ]]
 
--- // 1. CẤU HÌNH NGƯỜI DÙNG (USER CONFIG) //
-_G.V4_Config = {
-    ["LockTiers"] = 10, -- Tự kick nếu Tier > 10 (Tránh reset)
-    ["Helper"] = { "HelperAccount1", "" }, -- Tên acc phụ
-    ["V4FarmList"] = { "MainAccount1" } -- Tên acc chính
+--// CẤU HÌNH (CONFIG)
+getgenv().ConfigV4 = {
+    ["Account Up Gear"] = {
+        "UserMain1" -- Tên đăng nhập Acc Chính
+    },
+    ["Account Help"] = {
+        "UserHelp1", "UserHelp2" -- Tên đăng nhập Acc Phụ
+    },
+    ["Auto Join"] = true,
+    ["Webhook"] = {
+        ["url"] = "", 
+        ["Done Train"] = false, 
+        ["Done Trial"] = false,
+        ["Tiers"] = "1-10",
+        ["ChooseGear"] = "Red, Red, Blue",
+    }
 }
+getgenv().AccountFindFullMoon = "" 
 
--- Cài đặt Global
-_G.TweenSpeed = 300 -- Tốc độ bay an toàn
-_G.WhiteScreen = false -- Màn hình trắng giảm lag
-_G.AutoGear = true -- Luôn tự mua Gear (Chạy ngầm)
+--// VARIABLES
+getgenv().AutoFarmBone = false
+getgenv().AutoV4Loop = true
+getgenv().AutoActivateV4 = true
+getgenv().SelectWeapon = "Melee" -- Mặc định Melee
 
--- // 2. KHỞI TẠO DỊCH VỤ (SERVICES) //
+-- Redz Variables
+local StartBring = false
+local MonFarm = ""
+local PosMon = CFrame.new(0,0,0)
+
+--// SERVICES
 local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
 local VirtualUser = game:GetService("VirtualUser")
 local VirtualInputManager = game:GetService("VirtualInputManager")
-local TeleportService = game:GetService("TeleportService")
+local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
-local Lighting = game:GetService("Lighting")
-local CoreGui = game:GetService("CoreGui")
 
-local LocalPlayer = Players.LocalPlayer
+local LP = Players.LocalPlayer
 
--- // 3. TẢI UI LIBRARY (FIX LỖI NIL) //
+--// UI LOADING
 local Fluent = nil
 local success, result = pcall(function()
     return loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 end)
+if success and result then Fluent = result else return end
 
-if success and result then
-    Fluent = result
-else
-    -- Link dự phòng nếu link chính chết
-    local backup_success, backup_result = pcall(function()
-        return loadstring(game:HttpGet("https://raw.githubusercontent.com/bloodball/-back-ups-for-libs/main/fluent"))()
-    end)
-    if backup_success and backup_result then
-        Fluent = backup_result
-    else
-        game.StarterGui:SetCore("SendNotification", {
-            Title = "Zeraa Hub Error",
-            Text = "Không thể tải UI Library. Vui lòng kiểm tra mạng hoặc dùng VPN!",
-            Duration = 10
-        })
-        return -- Dừng script nếu không có UI
-    end
-end
-
-local Window = Fluent:CreateWindow({
-    Title = "Zeraa Hub Premium [V4 Fixed]",
-    SubTitle = "Auto Farm & Race V4",
-    TabWidth = 160,
-    Size = UDim2.fromOffset(580, 460),
-    Acrylic = false, 
-    Theme = "Darker",
-    MinimizeKey = Enum.KeyCode.End
-})
-
--- Tạo Tabs
-local Tabs = {
-    Main = Window:AddTab({ Title = "Farm Level" }),
-    V4 = Window:AddTab({ Title = "Race V4" }),
-    Stats = Window:AddTab({ Title = "Stats" }),
-    Teleport = Window:AddTab({ Title = "Teleport" }),
-    Raid = Window:AddTab({ Title = "Raid/Dungeon" }),
-    Sea = Window:AddTab({ Title = "Sea Events" }),
-    Shop = Window:AddTab({ Title = "Shop" }),
-    Settings = Window:AddTab({ Title = "Settings" })
-}
-
--- // 4. HÀM HỖ TRỢ CỐT LÕI (CORE FUNCTIONS) //
-
-local function Notify(content)
-    Fluent:Notify({Title = "Zeraa Hub", Content = content, Duration = 3})
-end
-
-local function getCharacter()
-    return LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-end
-
-local function getHRP()
-    local char = getCharacter()
-    return char:WaitForChild("HumanoidRootPart", 10)
-end
-
--- Smart Move: Xa > 2500 TP, Gần thì Tween (Fix Kick)
-local function SmartMove(targetCFrame)
-    if not targetCFrame then return end
-    local hrp = getHRP()
-    if not hrp then return end
-    
-    local dist = (hrp.Position - targetCFrame.Position).Magnitude
-    
-    if dist > 2500 then
-        hrp.CFrame = targetCFrame -- Instant TP
-        return
-    end
-
-    local speed = _G.TweenSpeed
-    local time = math.clamp(dist / speed, 0.1, 30)
-    local info = TweenInfo.new(time, Enum.EasingStyle.Linear)
-    
-    local bv = Instance.new("BodyVelocity")
-    bv.Velocity = Vector3.zero
-    bv.MaxForce = Vector3.new(1e9, 1e9, 1e9)
-    bv.Parent = hrp
-
-    local tween = TweenService:Create(hrp, info, {CFrame = targetCFrame})
-    tween:Play()
-    
-    -- Anti Fall / Noclip
-    local con
-    con = RunService.Stepped:Connect(function()
-        if LocalPlayer.Character then
-            for _, v in pairs(LocalPlayer.Character:GetDescendants()) do
-                if v:IsA("BasePart") then v.CanCollide = false end
-            end
+--// ANTI-BAN
+local function InitAntiBan()
+    local mt = getrawmetatable(game)
+    local old = mt.__namecall
+    setreadonly(mt, false)
+    mt.__namecall = newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+        local args = {...}
+        if method == "FireServer" and self.Name == "MainEvent" and table.find({"CHECK", "One", "TeleportDetect", "Kick"}, args[1]) then
+            return
         end
+        return old(self, ...)
     end)
-
-    tween.Completed:Connect(function()
-        bv:Destroy()
-        if con then con:Disconnect() end
-    end)
+    setreadonly(mt, true)
 end
+InitAntiBan()
 
-local function SendKey(key)
+--// FIX LAG (30s Loop)
+task.spawn(function()
+    while true do
+        pcall(function()
+            local args = {{}, false, "en-gb", "Mobile", Vector2.new(1600, 900), false, 1}
+            ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("OnEventServiceUpdate"):FireServer(unpack(args))
+        end)
+        task.wait(30)
+    end
+end)
+
+--// REDZ HUB CORE FUNCTIONS
+
+function EquipWeapon(toolName)
     pcall(function()
-        local k = key
-        -- Map string to Enum
-        local map = {
-            ["1"] = Enum.KeyCode.One, ["2"] = Enum.KeyCode.Two, ["3"] = Enum.KeyCode.Three, ["4"] = Enum.KeyCode.Four,
-            ["Z"] = Enum.KeyCode.Z, ["X"] = Enum.KeyCode.X, ["C"] = Enum.KeyCode.C, ["V"] = Enum.KeyCode.V, ["F"] = Enum.KeyCode.F, ["Y"] = Enum.KeyCode.Y
-        }
-        if map[key] then k = map[key] end
+        local backpack = LP.Backpack
+        local char = LP.Character
+        local tool = backpack:FindFirstChild(toolName) or char:FindFirstChild(toolName)
         
-        VirtualInputManager:SendKeyEvent(true, k, false, game)
-        task.wait(0.05)
-        VirtualInputManager:SendKeyEvent(false, k, false, game)
+        -- Nếu không tìm thấy tên cụ thể, tìm theo loại (Redz Logic)
+        if not tool then
+            for _, v in pairs(backpack:GetChildren()) do
+                if v:IsA("Tool") and v.ToolTip == "Melee" then
+                    tool = v
+                    break
+                end
+            end
+        end
+        
+        if tool and tool.Parent ~= char then
+            char.Humanoid:EquipTool(tool)
+        end
     end)
 end
 
-local function EquipWeapon(type) 
-    -- type: "Melee", "Sword", "Gun", "Fruit"
-    local bp = LocalPlayer.Backpack
-    local char = LocalPlayer.Character
-    local tool
-    
-    -- Ưu tiên hàng xịn
-    if type == "Melee" then
-        tool = bp:FindFirstChild("Godhuman") or bp:FindFirstChild("Electric Claw")
-    elseif type == "Sword" then
-        tool = bp:FindFirstChild("Cursed Dual Katana") or bp:FindFirstChild("Hallow Scythe")
-    end
-    
-    -- Nếu không có hàng xịn, lấy theo ToolTip
-    if not tool then
-        for _, t in pairs(bp:GetChildren()) do
-            if t:IsA("Tool") and t.ToolTip == type then
-                tool = t
-                break
-            end
-        end
-    end
-    
-    if tool then
-        local hum = char:FindFirstChild("Humanoid")
-        if hum then hum:EquipTool(tool) end
-    end
-end
-
--- Safe Attack (Fix Dam Ảo)
-local LastAtk = 0
-local function SafeAttack()
-    if tick() - LastAtk < 0.22 then return end -- Delay 0.22s
-    LastAtk = tick()
-    
-    local enemies = Workspace.Enemies:GetChildren()
-    local hrp = getHRP()
-    if not hrp then return end
-
-    for _, v in pairs(enemies) do
-        if v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 and v:FindFirstChild("HumanoidRootPart") then
-            if (v.HumanoidRootPart.Position - hrp.Position).Magnitude < 60 then
-                pcall(function()
-                    -- 1. Click
-                    VirtualUser:CaptureController()
-                    VirtualUser:Button1Down(Vector2.new(1280, 672))
-                    -- 2. Remote
-                    local net = ReplicatedStorage.Modules.Net
-                    if net:FindFirstChild("RegisterAttack") then net["RegisterAttack"]:FireServer(0) end
-                    if net:FindFirstChild("RegisterHit") then net["RegisterHit"]:FireServer(v.HumanoidRootPart) end
-                end)
-                break
-            end
-        end
-    end
-end
-
-local function AutoHaki()
-    if LocalPlayer.Character and not LocalPlayer.Character:FindFirstChild("HasBuso") then
+function AutoHaki()
+    if not LP.Character:FindFirstChild("HasBuso") then
         ReplicatedStorage.Remotes.CommF_:InvokeServer("Buso")
     end
 end
 
--- // 5. HỆ THỐNG ANTI-BAN CAO CẤP //
-spawn(function()
-    -- Anti-Kick
-    CoreGui.RobloxPromptGui.promptOverlay.ChildAdded:Connect(function(child)
-        if child.Name == "ErrorPrompt" then
-            TeleportService:Teleport(game.PlaceId, LocalPlayer)
+-- [REDZ TWEEN] - Sử dụng BodyVelocity để không bị rớt (BodyClip)
+function topos(CFrame)
+    if not LP.Character or not LP.Character:FindFirstChild("HumanoidRootPart") then return end
+    local HRP = LP.Character.HumanoidRootPart
+    
+    -- BodyClip Logic (Redz Anti-Fall)
+    if not HRP:FindFirstChild("BodyClip") then
+        local bv = Instance.new("BodyVelocity")
+        bv.Name = "BodyClip"
+        bv.Parent = HRP
+        bv.MaxForce = Vector3.new(100000, 100000, 100000)
+        bv.Velocity = Vector3.new(0, 0, 0)
+    end
+    
+    local Distance = (HRP.Position - CFrame.Position).Magnitude
+    local Speed = 300
+    local Time = Distance / Speed
+    
+    local TI = TweenInfo.new(Time, Enum.EasingStyle.Linear)
+    local Tween = TweenService:Create(HRP, TI, {CFrame = CFrame})
+    Tween:Play()
+    
+    -- Keep velocity 0 during tween
+    local conn
+    conn = RunService.Stepped:Connect(function()
+        if HRP:FindFirstChild("BodyClip") then
+            HRP.BodyClip.Velocity = Vector3.new(0, 0, 0)
+        end
+        -- Noclip
+        for _, v in pairs(LP.Character:GetDescendants()) do
+            if v:IsA("BasePart") and v.CanCollide then v.CanCollide = false end
         end
     end)
     
-    -- Anti-AFK & Random Input
-    LocalPlayer.Idled:Connect(function()
-        VirtualUser:CaptureController()
-        VirtualUser:ClickButton2(Vector2.new())
-    end)
+    Tween.Completed:Wait()
+    if conn then conn:Disconnect() end
     
-    while task.wait(math.random(100, 300)) do
-        SendKey("One") -- Fake switch weapon
-        task.wait(0.5)
-        SendKey("Two")
+    -- Giữ BodyClip nếu đang farm để không rớt
+    if not getgenv().AutoFarmBone and HRP:FindFirstChild("BodyClip") then
+        HRP.BodyClip:Destroy()
     end
-end)
+end
 
--- // 6. AUTO GEAR (CHẠY NGẦM) //
-spawn(function()
-    while task.wait(1.5) do
-        if _G.AutoGear then
+-- [REDZ BRING MOB LOOP] - Gom quái siêu dính
+task.spawn(function()
+    while true do
+        task.wait()
+        if StartBring then
             pcall(function()
-                ReplicatedStorage.Remotes.CommF_:InvokeServer("UpgradeRace", "Buy")
+                for _, v in pairs(Workspace.Enemies:GetChildren()) do
+                    if v.Name == MonFarm and v:FindFirstChild("HumanoidRootPart") and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
+                        -- Bring Logic
+                        v.HumanoidRootPart.CanCollide = false
+                        v.HumanoidRootPart.Size = Vector3.new(60, 60, 60)
+                        v.HumanoidRootPart.CFrame = PosMon -- Teleport mob đến vị trí farm
+                        v.Humanoid.WalkSpeed = 0
+                        v.Humanoid:ChangeState(11) -- Stun
+                        
+                        if LP.Character and LP.Character:FindFirstChild("HumanoidRootPart") then
+                            -- Set SimulationRadius to huge to own physics
+                            sethiddenproperty(LP, "SimulationRadius", math.huge)
+                        end
+                    end
+                end
             end)
         end
     end
 end)
 
--- // 7. LOGIC RACE V4 (CHI TIẾT) //
+--// AUTO FARM BONE (REDZ HUB EXACT LOGIC)
+function AutoFarmBoneOriginal()
+    task.spawn(function()
+        while getgenv().AutoFarmBone do
+            local hasMob = false
+            
+            -- Check Quest Mobs Priority (Redz Order)
+            local Mobs = {"Reborn Skeleton", "Living Zombie", "Demonic Soul", "Posessed Mummy"}
+            local TargetMob = nil
+            
+            -- Tìm quái còn sống
+            for _, name in ipairs(Mobs) do
+                local mob = Workspace.Enemies:FindFirstChild(name)
+                if mob and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 then
+                    TargetMob = mob
+                    break
+                end
+            end
+            
+            if TargetMob then
+                hasMob = true
+                StartBring = true
+                MonFarm = TargetMob.Name
+                
+                -- Vị trí farm: Trên đầu quái
+                PosMon = TargetMob.HumanoidRootPart.CFrame * CFrame.new(0, 30, 0)
+                
+                -- Tween đến quái
+                topos(PosMon)
+                
+                -- Equip & Haki
+                EquipWeapon()
+                AutoHaki()
+                
+                -- Attack
+                VirtualUser:CaptureController()
+                VirtualUser:Button1Down(Vector2.new(1280, 672))
+                
+                -- Redz Spam Skill (Z, X)
+                -- VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Z, false, game) ... (Optional)
+            else
+                -- Không có quái -> Về giữa bãi Bone để chờ spawn
+                StartBring = false
+                topos(CFrame.new(-9508, 142, 5737))
+            end
+            
+            task.wait()
+        end
+        -- Tắt Bring khi dừng farm
+        StartBring = false
+        if LP.Character and LP.Character:FindFirstChild("HumanoidRootPart") and LP.Character.HumanoidRootPart:FindFirstChild("BodyClip") then
+             LP.Character.HumanoidRootPart.BodyClip:Destroy()
+        end
+    end)
+end
 
-local ToT_Center = CFrame.new(28282, 14896, -11)
-local RaceDoors = {
-    ["Human"] = CFrame.new(29221, 14890, -206),
+--// TP TEMPLE OF TIME (DIRECT FIX)
+function TeleportToT()
+    local ToT_Pos = CFrame.new(28286, 14897, 103)
+    
+    -- 1. Load Map trước (Bypass Falling)
+    pcall(function()
+        local args = {{}, false, "en-gb", "Mobile", Vector2.new(1600, 900), false, 1}
+        ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("OnEventServiceUpdate"):FireServer(unpack(args))
+        LP.ReplicatedFirst:WaitForChild("RequestStreamAroundAsync"):InvokeServer(ToT_Pos.Position)
+    end)
+    task.wait(0.5)
+    
+    -- 2. Direct TP (Set CFrame)
+    if LP.Character and LP.Character:FindFirstChild("HumanoidRootPart") then
+        LP.Character.HumanoidRootPart.CFrame = ToT_Pos
+    end
+end
+
+--// AUTO ACTIVATE V4 (REDZ LOGIC)
+task.spawn(function()
+    while true do
+        task.wait()
+        if getgenv().AutoActivateV4 then
+             pcall(function()
+                if LP.Character and LP.Character:FindFirstChild("RaceTransformed") then
+                    -- Đã bật, không làm gì
+                else
+                    -- Chưa bật, spam Y
+                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Y, false, game)
+                    task.wait(0.1)
+                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Y, false, game)
+                end
+             end)
+        end
+    end
+end)
+
+--// TRIAL & GEAR LOGIC (Banana Cat)
+local V4_Door_Coords = {
+    ["Human"] = CFrame.new(29221, 14890, -205),
     ["Skypiea"] = CFrame.new(28960, 14919, 235),
     ["Fishman"] = CFrame.new(28231, 14890, -211),
-    ["Mink"] = CFrame.new(29012, 14890, -380),
+    ["Cyborg"] = CFrame.new(28502, 14895, -423),
     ["Ghoul"] = CFrame.new(28674, 14890, 445),
-    ["Cyborg"] = CFrame.new(28502, 14895, -423)
+    ["Mink"] = CFrame.new(29012, 14890, -380)
 }
+local AncientClock_CFrame = CFrame.new(28286, 14897, 103)
 
--- [TAB V4] UI Elements
-Tabs.V4:AddToggle("AutoDoor", {Title = "Auto Go To Door (Smart)", Default = false, Callback = function(v) _G.AutoDoor = v end})
-Tabs.V4:AddToggle("AutoUseRace", {Title = "Auto Use Race (Look Moon)", Default = false, Callback = function(v) _G.AutoUseRace = v end})
-Tabs.V4:AddToggle("AutoTrial", {Title = "Auto Complete Trial", Default = false, Callback = function(v) _G.AutoTrial = v end})
-Tabs.V4:AddToggle("AutoTrainV4", {Title = "Auto Train V4 (Maru)", Default = false, Callback = function(v) _G.AutoTrainV4 = v end})
-Tabs.V4:AddToggle("AutoKillPlayers", {Title = "Auto PvP (Kill Aura)", Default = false, Callback = function(v) _G.AutoKillPlayers = v end})
-
--- [LOGIC] Auto Door
-spawn(function()
-    while task.wait() do
-        if _G.AutoDoor then
+function StartTrialLoop()
+    task.spawn(function()
+        while getgenv().AutoV4Loop do
             pcall(function()
-                local hrp = getHRP()
-                if not hrp then return end
+                local race = LP.Data.Race.Value
+                local doorCF = V4_Door_Coords[race]
+                local ToT_Pos = CFrame.new(28286, 14897, 103)
+
+                if doorCF then
+                    -- 1. Đến ToT
+                    if (LP.Character.HumanoidRootPart.Position - ToT_Pos.Position).Magnitude > 3000 then
+                        TeleportToT() 
+                        task.wait(1)
+                    end
+                    
+                    -- 2. Đến Cửa
+                    if (LP.Character.HumanoidRootPart.Position - doorCF.Position).Magnitude > 15 then
+                        topos(doorCF)
+                    end
+                    
+                    -- 3. Spam Tộc (ActivateAbility)
+                    if (LP.Character.HumanoidRootPart.Position - doorCF.Position).Magnitude < 20 then
+                        ReplicatedStorage.Remotes.CommE:FireServer("ActivateAbility")
+                    end
+                end
                 
-                -- Check độ cao: Dưới 14000 là ở biển/đất -> TP lên Đền
-                if hrp.Position.Y < 14000 then
-                    hrp.CFrame = ToT_Center
-                else
-                    -- Đã ở Đền -> Tween vào Cửa
-                    local race = LocalPlayer.Data.Race.Value
-                    if RaceDoors[race] then
-                        SmartMove(RaceDoors[race])
+                -- 4. Logic Trial
+                if (LP.Character.HumanoidRootPart.Position - ToT_Pos.Position).Magnitude < 2000 then
+                     -- Check Role
+                    local isMain = false
+                    for _, name in pairs(getgenv().ConfigV4["Account Up Gear"]) do
+                        if LP.Name == name then isMain = true end
                     end
-                end
-            end)
-        end
-    end
-end)
-
--- [LOGIC] Auto Use Race
-spawn(function()
-    while task.wait(0.5) do
-        if _G.AutoUseRace then
-            pcall(function()
-                local moon = Lighting:GetMoonDirection()
-                if moon then
-                    Workspace.CurrentCamera.CFrame = CFrame.lookAt(Workspace.CurrentCamera.CFrame.Position, moon * 10000)
-                end
-                ReplicatedStorage.Remotes.CommE:FireServer("ActivateAbility")
-            end)
-        end
-    end
-end)
-
--- [LOGIC] Auto Trial (Chi tiết theo yêu cầu)
-spawn(function()
-    while task.wait() do
-        if _G.AutoTrial then
-            pcall(function()
-                local race = LocalPlayer.Data.Race.Value
-                local hrp = getHRP()
-                if not hrp then return end
-
-                -- TỘC MINK (Thỏ): TP Đích
-                if race == "Mink" then
-                    for _, v in pairs(Workspace.Map:GetDescendants()) do
-                        if v.Name == "FinishPoint" or v.Name == "EndPoint" then
-                            hrp.CFrame = v.CFrame -- Dịch chuyển tức thời
-                        end
-                    end
-
-                -- TỘC SKY (Thiên Thần): Tween
-                elseif race == "Skypiea" then
-                    local sky = Workspace.Map:FindFirstChild("SkyTrial")
-                    if sky then
-                        local endPart = sky.Model:FindFirstChild("snowisland_Cylinder.081")
-                        if endPart then SmartMove(endPart.CFrame) end
-                    end
-
-                -- TỘC HUMAN / GHOUL: Kill Mobs
-                elseif race == "Human" or race == "Ghoul" then
-                    for _, v in pairs(Workspace.Enemies:GetChildren()) do
-                        if v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
-                            local root = v:FindFirstChild("HumanoidRootPart")
-                            if root and (root.Position - hrp.Position).Magnitude < 1000 then
-                                SmartMove(root.CFrame * CFrame.new(0,5,0))
-                                AutoHaki()
-                                EquipWeapon("Melee")
-                                SafeAttack()
-                                -- Gom quái
-                                root.CFrame = hrp.CFrame * CFrame.new(0,0,-3)
-                                root.CanCollide = false
-                            end
-                        end
-                    end
-
-                -- TỘC CYBORG (Máy): TP về Sảnh né bom
-                elseif race == "Cyborg" then
-                    -- Nếu đang ở xa tâm (tức là trong phòng trial) -> TP về tâm
-                    if (hrp.Position - ToT_Center.Position).Magnitude > 300 then
-                        hrp.CFrame = ToT_Center
-                    end
-
-                -- TỘC SHARK (Cá): Tìm SeaBeast -> Spam Vũ khí & Chiêu
-                elseif race == "Fishman" then
-                    local sbFolder = Workspace:FindFirstChild("SeaBeasts")
-                    local target = nil
-                    local minDist = math.huge
-
-                    if sbFolder then
-                        for _, v in pairs(sbFolder:GetChildren()) do
-                            if v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 and v:FindFirstChild("HumanoidRootPart") then
-                                local dist = (v.HumanoidRootPart.Position - hrp.Position).Magnitude
-                                if dist < minDist then
-                                    minDist = dist
-                                    target = v
+                    
+                    if isMain then
+                        -- Main: Kill All Players near ToT
+                        for _, plr in pairs(Players:GetPlayers()) do
+                            if plr ~= LP and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+                                if (plr.Character.HumanoidRootPart.Position - ToT_Pos.Position).Magnitude < 1500 then
+                                    local isHelper = false
+                                    for _, hName in pairs(getgenv().ConfigV4["Account Help"]) do
+                                        if plr.Name == hName then isHelper = true end
+                                    end
+                                    
+                                    if not isHelper then
+                                        -- Kill
+                                        topos(plr.Character.HumanoidRootPart.CFrame * CFrame.new(0, 5, 0))
+                                        EquipWeapon()
+                                        VirtualUser:CaptureController()
+                                        VirtualUser:Button1Down(Vector2.new(1280, 672))
+                                        -- Spam Skill
+                                        VirtualUser:TypeKey(Enum.KeyCode.Z)
+                                        VirtualUser:TypeKey(Enum.KeyCode.X)
+                                    end
                                 end
                             end
                         end
-                    end
-
-                    if target then
-                        -- Bay tới đầu Sea Beast
-                        SmartMove(target.HumanoidRootPart.CFrame * CFrame.new(0, 50, 0))
                         
-                        -- SPAM: Đổi súng 1->4 và dùng chiêu
-                        local weapons = {"1", "2", "3", "4"} 
-                        local skills = {"Z", "X", "C", "V"}
-
-                        for _, w in ipairs(weapons) do
-                            SendKey(w) -- Đổi vũ khí
-                            task.wait(0.2)
-                            -- Xả skill
-                            for _, s in ipairs(skills) do
-                                SendKey(s)
-                                task.wait(0.1)
+                        -- Win -> Buy Gear
+                        if (LP.Character.HumanoidRootPart.Position - AncientClock_CFrame.Position).Magnitude < 500 then
+                            topos(AncientClock_CFrame)
+                            task.wait(1)
+                            if Workspace.Map.TempleOfTime:FindFirstChild("AncientClock") then
+                                fireclickdetector(Workspace.Map.TempleOfTime.AncientClock.ClickDetector)
                             end
+                            task.wait(2)
+                            ReplicatedStorage.Remotes.CommF_:InvokeServer("UpgradeRace", "Buy")
                         end
-                    end
-                end
-            end)
-        end
-    end
-end)
-
--- [LOGIC] Auto Kill Players (PvP)
-spawn(function()
-    while task.wait() do
-        if _G.AutoKillPlayers then
-            pcall(function()
-                local hrp = getHRP()
-                for _, pl in pairs(Players:GetPlayers()) do
-                    if pl ~= LocalPlayer and pl.Character and pl.Character:FindFirstChild("Humanoid") and pl.Character.Humanoid.Health > 0 then
-                        local pHrp = pl.Character.HumanoidRootPart
-                        -- Check khoảng cách (Trong đấu trường)
-                        if (pHrp.Position - hrp.Position).Magnitude < 800 then
-                            SmartMove(pHrp.CFrame * CFrame.new(0,4,0))
-                            AutoHaki()
-                            EquipWeapon("Melee")
-                            SafeAttack()
-                            SendKey("Z"); SendKey("X")
-                        end
-                    end
-                end
-            end)
-        end
-    end
-end)
-
--- [LOGIC] Auto Train (Maru Style)
-spawn(function()
-    while task.wait() do
-        if _G.AutoTrainV4 then
-            pcall(function()
-                local char = getCharacter()
-                local hrp = getHRP()
-                if not char or not hrp then return end
-
-                local transformed = char:FindFirstChild("RaceTransformed")
-
-                if transformed then
-                    -- GIAI ĐOẠN 3: Đã bật tộc -> Bay lên trời cao (Y=2000)
-                    local skyPos = CFrame.new(hrp.Position.X, 2000, hrp.Position.Z)
-                    SmartMove(skyPos)
-                    
-                    -- Spam skill ảo để giữ trạng thái combat
-                    if tick() % 2 == 0 then
-                        SendKey("Z")
-                        task.wait(0.1)
-                        SendKey("X")
-                    end
-                else
-                    -- GIAI ĐOẠN 1: Chưa bật tộc -> Farm nộ ở Haunted Castle
-                    local target = nil
-                    for _, v in pairs(Workspace.Enemies:GetChildren()) do
-                        if (v.Name == "Reborn Skeleton" or v.Name == "Living Zombie") and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
-                            target = v
-                            break
-                        end
-                    end
-
-                    if target then
-                        SmartMove(target.HumanoidRootPart.CFrame * CFrame.new(0,5,0))
-                        AutoHaki()
-                        EquipWeapon("Melee")
-                        SafeAttack()
-                        
-                        -- Gom quái
-                        for _, v in pairs(Workspace.Enemies:GetChildren()) do
-                            if (v.Name == "Reborn Skeleton" or v.Name == "Living Zombie") and (v.HumanoidRootPart.Position - hrp.Position).Magnitude < 300 then
-                                v.HumanoidRootPart.CFrame = target.HumanoidRootPart.CFrame
-                                v.HumanoidRootPart.CanCollide = false
-                            end
-                        end
-                        
-                        -- GIAI ĐOẠN 2: Spam Y để bật tộc
-                        SendKey("Y")
                     else
-                        -- Không có quái -> Bay về bãi farm (-9513, 164, 5786)
-                        SmartMove(CFrame.new(-9513, 164, 5786))
+                        -- Help: Reset if in Trial
+                         if (LP.Character.HumanoidRootPart.Position - ToT_Pos.Position).Magnitude < 1500 then
+                             -- Đơn giản: Reset liên tục nếu ở trong khu vực trial
+                             LP.Character.Humanoid.Health = 0
+                         end
                     end
                 end
             end)
+            task.wait(1)
         end
-    end
-end)
+    end)
+end
 
--- // 8. FARM LEVEL (CƠ BẢN) //
-Tabs.Main:AddToggle("AutoLevel", {
-    Title = "Auto Farm Level",
-    Default = false,
-    Callback = function(v) _G.AutoLevel = v end
+--// UI SETUP (FLUENT)
+local Window = Fluent:CreateWindow({
+    Title = "Auto V4 Ultimate (Redz Copy 100%)",
+    SubTitle = "Fixed Fall & TP",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 460),
+    Acrylic = true,
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.LeftControl
 })
 
-spawn(function()
-    while task.wait() do
-        if _G.AutoLevel then
-            pcall(function()
-                -- Logic xác định quái dựa trên Level (Rút gọn)
-                local level = LocalPlayer.Data.Level.Value
-                local mobName = "Bandit"
-                local questName = "BanditQuest1"
-                local levelReq = 1
-                local mobCFrame = CFrame.new(1060, 16, 1547)
-                local questCFrame = CFrame.new(1060, 16, 1547)
+local Tabs = {
+    Main = Window:AddTab({ Title = "Main Control", Icon = "home" }),
+    Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
+}
 
-                -- Ví dụ logic cơ bản (Thực tế cần list mob dài hơn)
-                if level >= 1 then 
-                    -- Tự động nhận diện mob gần nhất hoặc theo list (Giả lập)
-                    -- Phần này bạn có thể thêm logic check level chi tiết nếu cần
-                end
+-- Role Detection
+local Role = "Unknown"
+for _, n in pairs(getgenv().ConfigV4["Account Up Gear"]) do if LP.Name == n then Role = "Up Gear" end end
+for _, n in pairs(getgenv().ConfigV4["Account Help"]) do if LP.Name == n then Role = "Helper" end end
 
-                -- Nhận Quest
-                local guideModule = require(ReplicatedStorage.GuideModule)
-                local currentQuest = guideModule["CurrentQuest"]
-                
-                if not currentQuest then
-                    SmartMove(questCFrame)
-                    if (getHRP().Position - questCFrame.Position).Magnitude < 10 then
-                        ReplicatedStorage.Remotes.CommF_:InvokeServer("StartQuest", questName, levelReq)
-                    end
-                else
-                    -- Đánh quái
-                    for _, v in pairs(Workspace.Enemies:GetChildren()) do
-                        if v.Name == mobName and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
-                            SmartMove(v.HumanoidRootPart.CFrame * CFrame.new(0,7,0))
-                            AutoHaki()
-                            EquipWeapon("Melee")
-                            SafeAttack()
-                            v.HumanoidRootPart.CFrame = getHRP().CFrame * CFrame.new(0,0,-3)
-                            v.HumanoidRootPart.CanCollide = false
-                            break
-                        end
-                    end
-                end
-            end)
-        end
-    end
+Tabs.Main:AddParagraph({ Title = "Info", Content = "Role: " .. Role })
+
+local BoneToggle = Tabs.Main:AddToggle("AutoBone", {Title = "Auto Farm Bone (Redz Original)", Default = false })
+BoneToggle:OnChanged(function()
+    getgenv().AutoFarmBone = BoneToggle.Value
+    if getgenv().AutoFarmBone then AutoFarmBoneOriginal() end
 end)
 
--- // 9. SETTINGS TAB //
-Tabs.Settings:AddButton({Title = "Rejoin Server", Callback = function() TeleportService:Teleport(game.PlaceId, LocalPlayer) end})
-Tabs.Settings:AddButton({Title = "Hop Server", Callback = function() 
-    -- Logic Hop Server cơ bản
-    local PlaceID = game.PlaceId
-    local AllIDs = {}
-    local found = false
-    local function Teleport()
-        while wait() do
-            pcall(function()
-                local Site = game.HttpService:JSONDecode(game:HttpGet('https://games.roblox.com/v1/games/' .. PlaceID .. '/servers/Public?sortOrder=Asc&limit=100'))
-                for i,v in pairs(Site.data) do
-                    if v.playing ~= v.maxPlayers then
-                        local ID = v.id
-                        if not found then
-                            table.insert(AllIDs, ID)
-                        end
-                    end
-                end
-            end)
-            if found then break end
-            pcall(function()
-                TeleportService:TeleportToPlaceInstance(PlaceID, AllIDs[math.random(1, #AllIDs)], LocalPlayer)
-            end)
-            wait(4)
-        end
-    end
-    Teleport()
-end})
+local V4Toggle = Tabs.Main:AddToggle("AutoV4", {Title = "Auto V4 Loop", Default = true })
+V4Toggle:OnChanged(function() getgenv().AutoV4Loop = V4Toggle.Value end)
 
--- // KẾT THÚC //
-Notify("Zeraa Hub Premium Loaded Successfully!")
+local V4ActToggle = Tabs.Main:AddToggle("AutoActV4", {Title = "Auto Activate V4 (Redz)", Default = true })
+V4ActToggle:OnChanged(function() getgenv().AutoActivateV4 = V4ActToggle.Value end)
+
+Tabs.Main:AddButton({
+    Title = "Fix TP Temple of Time",
+    Description = "TP Ngay Lập Tức",
+    Callback = function() TeleportToT() end
+})
+
+Window:SelectTab(1)
+Fluent:Notify({ Title = "Script Loaded", Content = "Auto V4 Ultimate Loaded", Duration = 5 })
+
+--// AUTO EXECUTE LOGIC
+if Role == "Up Gear" then
+    if getgenv().ConfigV4.Webhook["Done Train"] == false then
+        BoneToggle:SetValue(true)
+    else
+        StartTrialLoop()
+    end
+elseif Role == "Helper" then
+    StartTrialLoop()
+end
+
+-- Auto Rejoin
+if getgenv().ConfigV4["Auto Join"] then
+    game.CoreGui.RobloxPromptGui.promptOverlay.ChildAdded:Connect(function(child)
+        if child.Name == 'ErrorPrompt' and child:FindFirstChild('MessageArea') and child.MessageArea:FindFirstChild("ErrorFrame") then
+            game:GetService("TeleportService"):Teleport(game.PlaceId)
+        end
+    end)
+end
