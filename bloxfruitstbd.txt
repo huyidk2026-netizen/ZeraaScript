@@ -6,12 +6,12 @@ local Luna = loadstring(game:HttpGet("https://paste.ee/r/WSCKThwW", true))()
 
 
 local Window = Luna:CreateWindow({
-	Name = "TheBillDevHub", 
-	Subtitle = nil,  
+	Name = "ZeraaHub", 
+	Subtitle = by ZerDoMin,  
 	LogoID = "75237883871377",  
 	LoadingEnabled = true,
-	LoadingTitle = "TheBillDevHub",
-	LoadingSubtitle = "by Galaxy/Jah/Whohurtyoudear",
+	LoadingTitle = "Nothing",
+	LoadingSubtitle = "Bugs alot",
 
 	ConfigSettings = {
 		RootFolder = nil,
